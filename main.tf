@@ -116,3 +116,83 @@ resource "aws_iam_role_policy_attachment" "lambda_policy" {
   role       = aws_iam_role.lambda_exec.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
+
+resource "aws_apigatewayv2_api" "lambda_api" {
+    name = "serverless_lambda_gw"
+    protocol_type = "HTTP"
+}
+
+resource "aws_apigatewayv2_stage" "lambda_api" {
+  api_id = aws_apigatewayv2_api.lambda_api.id
+
+  name        = "lambda_api_stage"
+  auto_deploy = true
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_gw.arn
+
+    format = jsonencode({
+      requestId               = "$context.requestId"
+      sourceIp                = "$context.identity.sourceIp"
+      requestTime             = "$context.requestTime"
+      protocol                = "$context.protocol"
+      httpMethod              = "$context.httpMethod"
+      resourcePath            = "$context.resourcePath"
+      routeKey                = "$context.routeKey"
+      status                  = "$context.status"
+      responseLength          = "$context.responseLength"
+      integrationErrorMessage = "$context.integrationErrorMessage"
+      }
+    )
+  }
+}
+
+resource "aws_apigatewayv2_integration" "is_positive" {
+  api_id = aws_apigatewayv2_api.lambda_api.id
+  integration_type = "AWS_PROXY"
+  integration_method = "POST"
+  integration_uri = aws_lambda_function.is_positive.invoke_arn
+}
+
+resource "aws_apigatewayv2_integration" "random" {
+  api_id = aws_apigatewayv2_api.lambda_api.id
+  integration_type = "AWS_PROXY"
+  integration_method = "POST"
+  integration_uri = aws_lambda_function.random.invoke_arn
+}
+
+resource "aws_apigatewayv2_route" "is_positive" {
+    api_id = aws_apigatewayv2_api.lambda_api.id
+    route_key = "GET /is-positive"
+    target = "integrations/${aws_apigatewayv2_integration.is_positive.id}"
+}
+
+resource "aws_apigatewayv2_route" "random" {
+    api_id = aws_apigatewayv2_api.lambda_api.id
+    route_key = "GET /random"
+    target = "integrations/${aws_apigatewayv2_integration.random.id}"
+}
+
+resource "aws_cloudwatch_log_group" "api_gw" {
+  name = "/aws/apigateway/${aws_apigatewayv2_api.lambda_api.name}"
+
+  retention_in_days = 30
+}
+
+resource "aws_lambda_permission" "api_gw_is_positive" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.is_positive.function_name
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${aws_apigatewayv2_api.lambda_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "api_gw_random" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.random.function_name
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${aws_apigatewayv2_api.lambda_api.execution_arn}/*/*"
+}
